@@ -3,7 +3,7 @@
     File name: restoreFromS3.py
     Author: Daniel Procopio
     Creation date: 24-Jan-2022
-    Last modified: 25-Jan-2022
+    Last modified: 30-Jan-2022
     Python Version: 3.8
 '''
 import argparse
@@ -87,6 +87,7 @@ def restore_from_s3(client, bucket, path, target, restore_date):
     total_objs = 0
     total_size = 0
 
+    md = []
     paginator = client.get_paginator('list_objects_v2')
     for result in paginator.paginate(Bucket=bucket, Prefix=path):
         # Download each file individually
@@ -106,6 +107,7 @@ def restore_from_s3(client, bucket, path, target, restore_date):
                 log.info("├── Retrieving dir metadata ...")
                 metadata       = client.head_object(Bucket=bucket, Key=key['Key'])
 
+                dirname        = key['Key']
                 atime          = get_time_in_secs(metadata['ResponseMetadata']['HTTPHeaders']['x-amz-meta-file-atime'])
                 mtime          = get_time_in_secs(metadata['ResponseMetadata']['HTTPHeaders']['x-amz-meta-file-mtime'])
                 owner          = int(metadata['ResponseMetadata']['HTTPHeaders']['x-amz-meta-file-owner'])
@@ -113,20 +115,9 @@ def restore_from_s3(client, bucket, path, target, restore_date):
                 permissions    = int(metadata['ResponseMetadata']['HTTPHeaders']['x-amz-meta-file-permissions'][-4:], base=8)
                 perms_to_print = metadata['ResponseMetadata']['HTTPHeaders']['x-amz-meta-file-permissions'][-4:]
 
-                log.info("├── Done!")
-                log.info("├── Applying metadata ...")
-                log.info("├───── atime: {}".format(atime))
-                log.info("├───── mtime: {}".format(mtime))
-                log.info("├───── owner: {}".format(owner))
-                log.info("├───── group: {}".format(group))
-                log.info("├───── permissions: {}".format(perms_to_print))
+                element        = { 'dirname': dirname, 'atime': atime, 'mtime': mtime, 'owner': owner, 'group': group, 'permissions': permissions, 'perms_to_print': perms_to_print }
 
-                try:
-                    os.utime(tgtobj, times=(atime,mtime))
-                    os.chown(tgtobj, owner, group)
-                    os.chmod(tgtobj, permissions)
-                except BaseException as e:
-                    raise
+                md.append(element)
 
                 log.info("└── Done!\n")
             else:
@@ -158,19 +149,39 @@ def restore_from_s3(client, bucket, path, target, restore_date):
                            perms_to_print = metadata['ResponseMetadata']['HTTPHeaders']['x-amz-meta-file-permissions'][-4:]
                            log.info("├── Done!")
                            log.info("├── Applying metadata ...")
-                           log.info("├───── atime: {}".format(atime))
-                           log.info("├───── mtime: {}".format(mtime))
+                           log.info("├───── atime: {} {}".format(atime, datetime.datetime.fromtimestamp(atime)))
+                           log.info("├───── mtime: {} {}".format(mtime, datetime.datetime.fromtimestamp(mtime)))
                            log.info("├───── owner: {}".format(owner))
                            log.info("├───── group: {}".format(group))
                            log.info("├───── permissions: {}".format(perms_to_print))
                            try:
-                               os.utime(tgtobj, times=(atime,mtime))
                                os.chown(tgtobj, owner, group)
                                os.chmod(tgtobj, permissions)
+                               os.utime(tgtobj, times=(atime,mtime))
                            except BaseException as e:
                                raise
                            log.info("└── Done!\n")
                            break
+    md.reverse()
+    time.sleep(1)
+    for element in md:
+       print(element)
+       log.info("Applying directory metadata ...")
+       log.info("├───── dir: {}".format(element['dirname']))
+       log.info("├───── atime: {} {}".format(element['atime'], datetime.datetime.fromtimestamp(element['atime'])))
+       log.info("├───── mtime: {} {}".format(element['mtime'], datetime.datetime.fromtimestamp(element['mtime'])))
+       log.info("├───── owner: {}".format(element['owner']))
+       log.info("├───── group: {}".format(element['group']))
+       log.info("├───── permissions: {}".format(element['perms_to_print']))
+
+       try:
+           os.chown(target + "/" + element['dirname'], element['owner'], element['group'])
+           os.chmod(target + "/" + element['dirname'], element['permissions'])
+           os.utime(target + "/" + element['dirname'], times=(element['atime'],element['mtime']))
+       except BaseException as e:
+           raise
+       log.info("└── Done!\n")
+
 
     log.info("Total objects restored : {}".format(total_objs))
     size, label = format_bytes(total_size)
