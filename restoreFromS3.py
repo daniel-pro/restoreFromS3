@@ -3,7 +3,7 @@
     File name: restoreFromS3.py
     Author: Daniel Procopio
     Creation date: 24-Jan-2022
-    Last modified: 30-Jan-2022
+    Last modified: 25-Feb-2022
     Python Version: 3.8
 '''
 import argparse
@@ -14,6 +14,7 @@ import logging
 import os
 import pytz
 import time
+from pathlib import Path
 from rich.logging import RichHandler
 from rich.tree import Tree
 
@@ -80,9 +81,9 @@ def restore_from_s3(client, bucket, path, target, restore_date):
     log.info("            Logfile: {}".format(logfilename))
     log.info("")
 
-    # Handle missing / at end of prefix
+    single_file_restore = False
     if not path.endswith('/'):
-         path += '/'
+         single_file_restore = True
 
     total_objs = 0
     total_size = 0
@@ -129,6 +130,8 @@ def restore_from_s3(client, bucket, path, target, restore_date):
                        obj_content_length = obj.get('ContentLength')
                        if obj_date <= restore_date:
                            log.info("Restoring file: {} ...".format(str(key['Key'])))
+                           if single_file_restore:
+                              Path(os.path.split(tgtobj)[0]).mkdir(parents=True, exist_ok=True)
                            client.download_file(bucket, key['Key'], tgtobj, ExtraArgs={"VersionId": obj_version_id})
                            size, label = format_bytes(obj_content_length)
                            log.info("├── Data ")
@@ -163,9 +166,7 @@ def restore_from_s3(client, bucket, path, target, restore_date):
                            log.info("└── Done!\n")
                            break
     md.reverse()
-    time.sleep(1)
     for element in md:
-       print(element)
        log.info("Applying directory metadata ...")
        log.info("├───── dir: {}".format(element['dirname']))
        log.info("├───── atime: {} {}".format(element['atime'], datetime.datetime.fromtimestamp(element['atime'])))
